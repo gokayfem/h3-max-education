@@ -1,0 +1,33 @@
+{
+  "name": "@axiom/persistence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint src",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "migrate": "tsx src/migrate.ts"
+  },
+  "dependencies": {
+    "@axiom/domain": "workspace:*",
+    "@axiom/protocol": "workspace:*",
+    "@neondatabase/serverless": "^1.0.2",
+    "@upstash/redis": "^1.35.3",
+    "pg": "^8.23.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "@vitest/coverage-v8": "^3.2.0",
+    "eslint": "^9.39.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}
