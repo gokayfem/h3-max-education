@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+/*
+ * H3 Max Realtime Education design tokens — editorial-mono system (ref: .design/03-editorial-mono).
+ * White editorial surfaces, near-black scientific canvas, cyan/green/amber
+ * signals, fine rules, minimal radii. Flat color only: no gradients, no
+ * glassmorphism.
+ */
+:root {
+  /* editorial surfaces — spec: .design/03-editorial-mono/spec/tokens.json */
+  --paper: #ededed;
+  --paper-raised: #f7f7f7;
+  --paper-sunken: #e2e2e2;
+  --line: #d5d5d5;
+  --line-strong: #b4b4b4;
+
+  /* ink */
+  --ink: #0a0f1a;
+  --ink-soft: #4a5560;
+  --ink-faint: #59616d;
+  --ink-inverse: #ffffff;
+
+  /* accents — text-safe derivatives of the signal palette */
+  --accent: #0e7fad;
+  --accent-strong: #0a648a;
+  --accent-soft: #d9eef8;
+  --teal: #15803d;
+  --teal-soft: #dcf3e4;
+  --gold: #b45309;
+  --gold-soft: #fbeed3;
+
+  /* scientific canvas (pure black) + raw signals */
+  --canvas-bg: #000000;
+  --canvas-raised: #0a0f1a;
+  --canvas-line: #232a38;
+  --canvas-ink: #ffffff;
+  --canvas-faint: #8a8d98;
+  --canvas-amber: #f59e0b;
+  --canvas-teal: #1bb6f0;
+  --canvas-green: #22c55e;
+  --canvas-red: #ff6b5e;
+  --signal-cyan: #1bb6f0;
+  --signal-cyan-text: #006f99;
+  --signal-green: #22c55e;
+  --signal-mic: #f59e0b;
+
+  /* type scale (1.25 ratio) */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.563rem;
+  --text-2xl: 1.953rem;
+  --text-3xl: 2.441rem;
+  --text-4xl: 3.052rem;
+
+  /* spacing scale, 4px base */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+  --sp-7: 3rem;
+  --sp-8: 4rem;
+
+  /* square controls */
+  --r-sm: 0;
+  --r-md: 0;
+  --r-lg: 0;
+
+  --shadow-raised: 0 1px 2px rgb(26 30 36 / 0.07), 0 4px 16px rgb(26 30 36 / 0.06);
+  --shadow-overlay: 0 2px 6px rgb(26 30 36 / 0.1), 0 12px 32px rgb(26 30 36 / 0.14);
+
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 140ms;
+  --dur-med: 280ms;
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-newsreader), Georgia, "Times New Roman", serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--paper);
+  --color-foreground: var(--ink);
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.55;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* Visible, consistent keyboard focus everywhere. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-2);
+  z-index: 100;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--ink);
+  color: var(--ink-inverse);
+  border-radius: var(--r-md);
+  transform: translateY(-300%);
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

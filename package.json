@@ -1,0 +1,27 @@
+{
+  "name": "h3-max-realtime-education",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "packageManager": "pnpm@11.21.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "dotenvx run -f .env -- pnpm --filter @axiom/web dev",
+    "dev:full": "dotenvx run -f .env -- turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:coverage": "turbo run test:coverage",
+    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@dotenvx/dotenvx": "^1.50.0",
+    "@types/node": "^24.0.0",
+    "turbo": "^2.5.0",
+    "typescript-eslint": "^8.41.0",
+    "typescript": "^5.9.0"
+  }
+}

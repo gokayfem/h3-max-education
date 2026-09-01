@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": [
+    "DAILY_VIDEO_SECONDS",
+    "FAL_KEY",
+    "FAL_GROK_VOICE_ENABLED",
+    "FAL_QUEUE_ENABLED",
+    "H3_ENABLED",
+    "GLOBAL_DAILY_VIDEO_SECONDS",
+    "MAX_CONCURRENT_VISUALS",
+    "LOCAL_TUTOR_ENABLED",
+    "NEXT_PUBLIC_FAL_GROK_VOICE_ENABLED",
+    "NEXT_PUBLIC_FAL_QUEUE_ENABLED"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "dist/**", "!.next/cache/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {
+      "dependsOn": ["^lint"]
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"]
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:coverage": {
+      "dependsOn": ["^build"],
+      "outputs": ["coverage/**"]
+    }
+  }
+}
