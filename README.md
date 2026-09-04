@@ -138,6 +138,21 @@ Set the optional standalone gateway's `METRICS_AUTH_TOKEN` to a random value of 
 
 Never add a `NEXT_PUBLIC_` prefix to a secret. Configure production values in the hosting provider rather than committing them.
 
+## Troubleshooting
+
+### Voice falls back to "Text only" and `/api/dev/fal-realtime-token` returns 502
+
+The local demo mints short-lived Grok Voice tokens through `POST /api/dev/fal-realtime-token`. It answers `502` and logs `fal realtime token request failed` in the `pnpm dev` terminal whenever fal rejects the key.
+
+The most common cause on a new account is an exhausted balance. fal responds with `403 User is locked. Reason: Exhausted balance`, and the lesson status bar shows a top-up prompt:
+
+1. Add credits at [fal.ai/dashboard/billing](https://fal.ai/dashboard/billing).
+2. Press **Retry connection** in the lesson, or reload the page. The dev server does not need a restart.
+
+The same lock blocks queued H3 Max video generation until the balance is topped up.
+
+Other rejections log fal's status and `detail` message. A `401` means the key itself is invalid; check `FAL_KEY` in `.env`.
+
 ## Commands
 
 ```sh
