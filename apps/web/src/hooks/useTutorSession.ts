@@ -1,5 +1,6 @@
 "use client";
 
+import { FAL_BALANCE_EXHAUSTED_MESSAGE, FAL_BALANCE_EXHAUSTED_SESSION_CODE } from "@/lib/fal-billing";
 import { RealtimeTutorSession, type CardSelection, type TutorCloseReason } from "@axiom/domain";
 import type { SessionEvent, SessionState, TutorToolCall } from "@axiom/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -78,6 +79,9 @@ function sessionErrorMessage(code: string): string {
   }
   if (code === "realtime_unavailable") {
     return "Voice is unavailable. You can continue by typing.";
+  }
+  if (code === FAL_BALANCE_EXHAUSTED_SESSION_CODE) {
+    return FAL_BALANCE_EXHAUSTED_MESSAGE;
   }
   return "The tutor connection hit a problem.";
 }

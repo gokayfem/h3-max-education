@@ -219,6 +219,36 @@ describe("useTutorSession recovery", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("shows the fal top-up link when the balance is exhausted", () => {
+    const { result } = renderHook(() => useTutorSession({
+      sessionId: "00000000-0000-4000-8000-000000000001",
+      learnerId: "learner-1",
+      autoOpen: false,
+    }));
+
+    act(() => {
+      harness.transports[0].callbacks.onSessionEvent({
+        protocolVersion: 1,
+        type: "session.error",
+        recoverable: true,
+        code: "FAL_BALANCE_EXHAUSTED",
+      });
+      harness.transports[0].callbacks.onSessionEvent({
+        protocolVersion: 1,
+        type: "session.status",
+        state: "text_only",
+        detail: "Your fal.ai balance is exhausted.",
+      });
+    });
+
+    expect(result.current.state).toBe("text_only");
+    expect(result.current.error).toEqual({
+      code: "FAL_BALANCE_EXHAUSTED",
+      recoverable: true,
+      message: "Your fal.ai balance is exhausted. Top up at https://fal.ai/dashboard/billing, then retry voice.",
+    });
+  });
+
   it("holds text, card, and interrupt commands until the in-flight open is truly ready", async () => {
     const { result } = renderHook(() => useTutorSession({
       sessionId: "00000000-0000-4000-8000-000000000001",

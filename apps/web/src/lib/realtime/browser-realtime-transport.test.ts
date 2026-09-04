@@ -794,6 +794,55 @@ describe("BrowserRealtimeTransport", () => {
     expect(mediaTransport.mode).toBe("text");
   });
 
+  it("falls back to typed mode with a top-up link when the fal balance is exhausted", async () => {
+    vi.stubEnv("NEXT_PUBLIC_FAL_GROK_VOICE_ENABLED", "true");
+    falMocks.connect.mockImplementation((
+      app: string,
+      handler: { tokenProvider: (appId: string) => Promise<string>; onError: (error: unknown) => void },
+    ) => {
+      void handler.tokenProvider(app).catch((error: unknown) => handler.onError(error));
+      return { send: vi.fn(), close: vi.fn() };
+    });
+    const { dependencies } = createHarness();
+    dependencies.createPeerConnection = vi.fn(() => {
+      throw new Error("WebRTC must not be used for Grok Voice.");
+    });
+    dependencies.fetch = vi.fn(async (input) => {
+      if (String(input).endsWith("/api/dev/fal-realtime-token")) {
+        return Response.json(
+          {
+            error: "Your fal.ai balance is exhausted. Top up at https://fal.ai/dashboard/billing, then retry voice.",
+            code: "fal_balance_exhausted",
+            billingUrl: "https://fal.ai/dashboard/billing",
+          },
+          { status: 502 },
+        );
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+    const events: SessionEvent[] = [];
+    const transport = new BrowserRealtimeTransport({
+      dependencies,
+      gatewayUrl: "",
+      onSessionEvent: (event) => events.push(event),
+    });
+
+    await transport.open({
+      sessionId: "44444444-4444-4444-8444-444444444444",
+      learnerId: "learner-1",
+    });
+
+    expect(transport.mode).toBe("text");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "session.error", code: "FAL_BALANCE_EXHAUSTED", recoverable: true }),
+      expect.objectContaining({
+        type: "session.status",
+        state: "text_only",
+        detail: expect.stringContaining("https://fal.ai/dashboard/billing"),
+      }),
+    ]));
+  });
+
   it("rejects transient speaker echo and auto-interrupts on sustained learner speech", async () => {
     vi.stubEnv("NEXT_PUBLIC_FAL_GROK_VOICE_ENABLED", "true");
     const sent: Record<string, unknown>[] = [];
