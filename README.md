@@ -10,6 +10,8 @@ https://github.com/user-attachments/assets/48bba979-9c30-438c-871c-73c37431bff3
 
 ## Features
 
+Experimental: [Conversational Blender studio](apps/blender-studio/README.md) connects the local GPT-6 Astra runtime to animated Blender geometry and H3 Max shots.
+
 - Realtime voice tutoring with automatic barge-in
 - Continuous H3 Max video generation from the latest explanation
 - Seamless decoded-video handoffs with no blank canvas

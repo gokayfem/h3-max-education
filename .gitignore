@@ -1,4 +1,6 @@
 node_modules/
+apps/blender-studio/.runtime*/
+__pycache__/
 .pnpm-store/
 .vercel/
 .next/
