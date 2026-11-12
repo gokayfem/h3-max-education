@@ -20,7 +20,7 @@
     "@neondatabase/serverless": "^1.0.2",
     "@upstash/redis": "^1.35.3",
     "pg": "^8.23.0",
-    "zod": "^4.1.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1",

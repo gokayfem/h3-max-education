@@ -48,8 +48,8 @@ importers:
         specifier: ^8.18.3
         version: 8.21.3
       zod:
-        specifier: ^4.1.5
-        version: 4.5.4
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@types/node':
         specifier: ^24.3.0
@@ -109,8 +109,8 @@ importers:
         specifier: ^0.0.1
         version: 0.0.1
       zod:
-        specifier: ^4.1.0
-        version: 4.5.4
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@tailwindcss/postcss':
         specifier: ^4
@@ -195,8 +195,8 @@ importers:
         specifier: ^8.23.0
         version: 8.23.0
       zod:
-        specifier: ^4.1.0
-        version: 4.5.4
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@types/pg':
         specifier: ^8.23.1
@@ -220,8 +220,8 @@ importers:
   packages/protocol:
     dependencies:
       zod:
-        specifier: ^4.1.0
-        version: 4.5.4
+        specifier: ^4.6.6
+        version: 4.6.6
     devDependencies:
       '@vitest/coverage-v8':
         specifier: ^3.2.0
@@ -3610,8 +3610,8 @@ packages:
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
 
-  zod@4.5.4:
-    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
+  zod@4.6.6:
+    resolution: {integrity: sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA==}
 
 snapshots:
 
@@ -5258,8 +5258,8 @@ snapshots:
       '@babel/parser': 7.29.8
       eslint: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
       hermes-parser: 0.25.1
-      zod: 4.5.4
-      zod-validation-error: 4.0.2(zod@4.5.4)
+      zod: 4.6.6
+      zod-validation-error: 4.0.2(zod@4.6.6)
     transitivePeerDependencies:
       - supports-color
 
@@ -7040,8 +7040,8 @@ snapshots:
 
   yoctocolors@2.2.0: {}
 
-  zod-validation-error@4.0.2(zod@4.5.4):
+  zod-validation-error@4.0.2(zod@4.6.6):
     dependencies:
-      zod: 4.5.4
+      zod: 4.6.6
 
-  zod@4.5.4: {}
+  zod@4.6.6: {}
