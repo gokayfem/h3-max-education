@@ -46,6 +46,45 @@ describe("POST /api/dev/fal-realtime-token", () => {
     );
   });
 
+  it("explains how to top up when fal reports an exhausted balance", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json(
+        { detail: "User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing" },
+        { status: 403 },
+      ),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: "Your fal.ai balance is exhausted. Top up at https://fal.ai/dashboard/billing, then retry voice.",
+      code: "fal_balance_exhausted",
+      billingUrl: "https://fal.ai/dashboard/billing",
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("https://fal.ai/dashboard/billing"),
+      expect.objectContaining({ status: 403 }),
+    );
+  });
+
+  it("returns 502 and logs the upstream reason for other fal rejections", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      Response.json({ detail: "Invalid authentication credentials" }, { status: 401 }),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const response = await POST(request());
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ error: "Grok Voice is unavailable." });
+    expect(warn).toHaveBeenCalledWith(
+      "fal realtime token request failed",
+      expect.objectContaining({ status: 401, detail: "Invalid authentication credentials" }),
+    );
+  });
+
   it("rejects cross-origin requests", async () => {
     const upstream = vi.spyOn(globalThis, "fetch");
 

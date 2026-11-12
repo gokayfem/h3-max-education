@@ -3,6 +3,12 @@ import "server-only";
 import { z } from "zod";
 import { assertSameOrigin, authErrorResponse } from "@/lib/server/auth";
 import { isFalFeatureEnabled } from "@/lib/server/fal-config";
+import {
+  FAL_BALANCE_EXHAUSTED_CODE,
+  FAL_BALANCE_EXHAUSTED_MESSAGE,
+  FAL_BILLING_URL,
+  isFalBalanceExhausted,
+} from "@/lib/fal-billing";
 
 export const runtime = "nodejs";
 
@@ -16,6 +22,12 @@ function unavailable(status = 503): Response {
     { error: "Grok Voice is unavailable." },
     { status, headers: PRIVATE_NO_STORE_HEADERS },
   );
+}
+
+function upstreamDetail(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || !("detail" in body)) return undefined;
+  const detail = (body as { detail: unknown }).detail;
+  return typeof detail === "string" ? detail : JSON.stringify(detail);
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -39,8 +51,25 @@ export async function POST(request: Request): Promise<Response> {
       body: JSON.stringify({ app: MODEL, duration: TOKEN_DURATION_SECONDS }),
       signal: AbortSignal.timeout(10_000),
     });
-    const parsed = tokenResponseSchema.safeParse(await upstream.json().catch(() => undefined));
+    const body: unknown = await upstream.json().catch(() => undefined);
+    const parsed = tokenResponseSchema.safeParse(body);
     if (!upstream.ok || !parsed.success) {
+      const detail = upstreamDetail(body);
+      if (isFalBalanceExhausted(upstream.status, detail)) {
+        console.warn(
+          `fal realtime token request failed: the fal.ai account balance is exhausted. Top up at ${FAL_BILLING_URL}, then retry.`,
+          { status: upstream.status, detail },
+        );
+        return Response.json(
+          {
+            error: FAL_BALANCE_EXHAUSTED_MESSAGE,
+            code: FAL_BALANCE_EXHAUSTED_CODE,
+            billingUrl: FAL_BILLING_URL,
+          },
+          { status: 502, headers: PRIVATE_NO_STORE_HEADERS },
+        );
+      }
+      console.warn("fal realtime token request failed", { status: upstream.status, detail });
       return unavailable(upstream.status >= 500 ? 503 : 502);
     }
 

@@ -1,3 +1,8 @@
+import {
+  FAL_BALANCE_EXHAUSTED_CODE,
+  FAL_BALANCE_EXHAUSTED_MESSAGE,
+  FAL_BALANCE_EXHAUSTED_SESSION_CODE,
+} from "../fal-billing";
 import type { TutorTransport } from "@axiom/domain";
 import { createFalClient, type RealtimeConnection } from "@fal-ai/client";
 import {
@@ -46,6 +51,7 @@ const falRealtimeTokenSchema = z.strictObject({
   token: z.string().min(16).max(8_192),
   expiresInSeconds: z.number().int().positive().max(300),
 });
+const falRealtimeTokenErrorSchema = z.object({ code: z.string() });
 
 const FAL_GROK_MODEL = "xai/grok-voice/realtime";
 const FAL_AUDIO_SAMPLE_RATE = 24_000;
@@ -247,6 +253,7 @@ export class BrowserRealtimeTransport implements TutorTransport {
   #openContext: OpenContext | null = null;
   #assistantTurn: { turnId: string; text: string; audioStartedAt: number | null } | null = null;
   #failureReported = false;
+  #falTokenFailure: { code: string; detail: string } | null = null;
   #mode: "voice" | "text" = "voice";
   #commandRevision: number;
   #outputAudioActive = false;
@@ -345,6 +352,7 @@ export class BrowserRealtimeTransport implements TutorTransport {
 
     this.#localStream = localStream;
     if (falGrokVoiceEnabled()) {
+      this.#falTokenFailure = null;
       try {
         await this.#openFalGrokVoice(context, realtimeAttemptId, isReconnect, localStream);
         this.#mode = "voice";
@@ -361,9 +369,10 @@ export class BrowserRealtimeTransport implements TutorTransport {
             { outcome: "failed", failureStage: "peer_connection" },
           );
         }
+        const tokenFailure = this.#takeFalTokenFailure();
         this.#enterTypedMode(
-          "FAL_GROK_UNAVAILABLE",
-          "Voice is temporarily unavailable. You can continue by typing.",
+          tokenFailure?.code ?? "FAL_GROK_UNAVAILABLE",
+          tokenFailure?.detail ?? "Voice is temporarily unavailable. You can continue by typing.",
         );
       }
       return;
@@ -679,10 +688,17 @@ export class BrowserRealtimeTransport implements TutorTransport {
             },
           );
           tokenRequestCount += 1;
-          const parsed = falRealtimeTokenSchema.safeParse(
-            await response.json().catch(() => undefined),
-          );
+          const body: unknown = await response.json().catch(() => undefined);
+          const parsed = falRealtimeTokenSchema.safeParse(body);
           if (!response.ok || !parsed.success) {
+            const failure = falRealtimeTokenErrorSchema.safeParse(body);
+            if (failure.success && failure.data.code === FAL_BALANCE_EXHAUSTED_CODE) {
+              this.#falTokenFailure = {
+                code: FAL_BALANCE_EXHAUSTED_SESSION_CODE,
+                detail: FAL_BALANCE_EXHAUSTED_MESSAGE,
+              };
+              throw new Error(FAL_BALANCE_EXHAUSTED_MESSAGE);
+            }
             throw new Error("Fal Grok Voice authorization failed.");
           }
           return parsed.data.token;
@@ -1443,6 +1459,13 @@ export class BrowserRealtimeTransport implements TutorTransport {
     if (!contentType.includes("application/json")) return null;
     const parsed = typedModeResponseSchema.safeParse(await response.json());
     return parsed.success ? parsed.data : null;
+  }
+
+  /** Read through a method so control-flow narrowing does not assume the field is still null. */
+  #takeFalTokenFailure(): { code: string; detail: string } | null {
+    const failure = this.#falTokenFailure;
+    this.#falTokenFailure = null;
+    return failure;
   }
 
   #enterTypedMode(code: string, detail: string): void {
