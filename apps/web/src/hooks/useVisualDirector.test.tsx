@@ -63,7 +63,7 @@ const mocks = vi.hoisted(() => {
 
 vi.mock("@/lib/visual/falVideoDirector", () => ({
   FalVideoDirector: vi.fn(
-    (options?: { onGenerationAccepted?: (reservationId: string) => void }) => {
+    function (options?: { onGenerationAccepted?: (reservationId: string) => void }) {
       mocks.setGenerationAccepted(options?.onGenerationAccepted);
       return mocks.director;
     },
