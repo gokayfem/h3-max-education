@@ -61,6 +61,13 @@ function request(body: unknown = {}): Request {
 }
 
 describe("GET /api/auth/session", () => {
+  it("returns a non-cacheable anonymous status without a session", async () => {
+    getSession.mockResolvedValueOnce(null);
+    const response = await GET(new Request("http://localhost/api/auth/session"));
+    await expect(response.json()).resolves.toEqual({ authenticated: false });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("maps an invalid cookie to 401", async () => {
     getSession.mockRejectedValueOnce(Object.assign(new Error("A valid learner session is required."), {
       status: 401,
@@ -143,6 +150,72 @@ describe("POST /api/auth/session", () => {
   });
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ["CF_PAGES", "1", "cf-connecting-ip"],
+    ["CLOUDFLARE_WORKER", "1", "cf-connecting-ip"],
+    ["FLY_APP_NAME", "axiom", "fly-client-ip"],
+    ["TRUSTED_CLIENT_IP_HEADER", " X-Real-IP ", "x-real-ip"],
+  ])("uses the trusted address for deployment %s and rejects a missing address", (name, value, header) => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv(name, value);
+    expect(trustedDeploymentNetwork(new Request("https://axiom.test", {
+      headers: { [header]: "203.0.113.9", "x-forwarded-for": "198.51.100.66" },
+    }))).toBe("ipv4:203.0.113.9/32");
+    expect(trustedDeploymentNetwork(new Request("https://axiom.test"))).toBeNull();
+  });
+
+  it("rejects an unapproved configurable forwarding header", () => {
+    vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "x-forwarded-for");
+    expect(trustedDeploymentNetwork(new Request("https://axiom.test", {
+      headers: { "x-forwarded-for": "203.0.113.9" },
+    }))).toBeNull();
+  });
+
+  it("uses only the first address in an explicitly trusted proxy chain", () => {
+    vi.stubEnv("TRUSTED_CLIENT_IP_HEADER", "x-real-ip");
+    expect(trustedDeploymentNetwork(new Request("https://axiom.test", {
+      headers: { "x-real-ip": "203.0.113.9, 198.51.100.66" },
+    }))).toBe("ipv4:203.0.113.9/32");
+  });
+
+  it("fails closed before admission when production has no authenticated network address", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(admitAnonymousLearner).not.toHaveBeenCalled();
+    expect(upsertProfile).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("applies explicitly configured admission bounds", async () => {
+    vi.stubEnv("ANONYMOUS_ADMISSION_GLOBAL_LIMIT", " 20 ");
+    vi.stubEnv("ANONYMOUS_ADMISSION_IP_LIMIT", "3");
+    vi.stubEnv("ANONYMOUS_ADMISSION_WINDOW_SECONDS", "60");
+    expect((await POST(request())).status).toBe(201);
+    expect(admitAnonymousLearner).toHaveBeenCalledWith(expect.objectContaining({
+      globalLimit: 20, networkLimit: 3, windowSeconds: 60,
+    }));
+  });
+
+  it.each(["0", "-1", "1.5", "invalid"])("rejects an unsafe admission limit (%s) before reserving capacity", async (value) => {
+    vi.stubEnv("ANONYMOUS_ADMISSION_GLOBAL_LIMIT", value);
+    const response = await POST(request());
+    expect(response.status).toBe(500);
+    expect(admitAnonymousLearner).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("retains the failure response when both admission rollback operations fail", async () => {
+    upsertProfile.mockRejectedValueOnce(new Error("database unavailable"));
+    revokeAuthSession.mockRejectedValueOnce(new Error("registry unavailable"));
+    releaseAnonymousLearner.mockRejectedValueOnce(new Error("admission unavailable"));
+    const response = await POST(request());
+    expect(response.status).toBe(500);
+    expect(revokeAuthSession).toHaveBeenCalledOnce();
+    expect(releaseAnonymousLearner).toHaveBeenCalledOnce();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("uses only the deployment-authenticated client IP header in production", () => {

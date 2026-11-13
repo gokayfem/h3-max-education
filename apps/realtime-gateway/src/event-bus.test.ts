@@ -732,6 +732,170 @@ describe("SessionEventBus", () => {
     });
   });
 
+  it("fails closed across distributed operations during a Redis outage", async () => {
+    const bus = new SessionEventBus(undefined, logger, undefined, { requireRedis: true });
+    const lease = { sessionId: "session", learnerId: "learner", gatewayInstanceToken: "instance" };
+    const permit = { id: "permit", sessionId: "session", learnerId: "learner", networkHash: "network" };
+    const operations = [
+      () => bus.bindSessionOwner("session", "learner"),
+      () => bus.refreshSessionOwner(lease),
+      () => bus.releaseSessionOwner(lease),
+      () => bus.finalizeSession(lease),
+      () => bus.reserveSocketPermit("session", "learner", "192.0.2.1"),
+      () => bus.refreshSocketPermit(permit),
+      () => bus.publish("session", "learner", STATUS),
+      () => bus.beginCommandOperation("session", "command", 1, 0),
+      () => bus.completeCommandOperation("session", "command", "attempt", []),
+      () => bus.reservePaidCommand("learner", "operation"),
+      () => bus.reserveVisualEntitlement({ learnerId: "learner", sessionId: "session", durationSeconds: 5 }),
+      () => bus.nextEventRevision("session", 0),
+      () => bus.readCommandRevision("session"),
+      () => bus.persistSessionState("session", SESSION_STATE),
+      () => bus.appendTranscript("session", "effect", { text: "Retain this" }),
+      () => bus.claimGatewayTicket({ nonce: "abcdefghijklmnop", learnerId: "lrn_abcdefghijklmnop", sessionId: "11111111-1111-4111-8111-111111111111", callId: "rtc_test", expiresAtUnixSeconds: 200 }, 100)
+    ];
+    try {
+      for (const operation of operations) await expect(operation()).rejects.toThrow(/Redis/);
+      expect(bus.readiness().redis).toBe(false);
+    } finally { await bus.close(); }
+  });
+
+  it("keeps finalized local sessions terminal and rejects stale ownership", async () => {
+    const bus = new SessionEventBus(undefined, logger);
+    const lease = (await bus.bindSessionOwner("session", "learner"))!;
+    const foreign = { ...lease, learnerId: "another-learner" };
+    const lost = { ...lease, gatewayInstanceToken: "lost-instance" };
+    await expect(bus.bindSessionOwner("session", "another-learner")).resolves.toBeUndefined();
+    await expect(bus.refreshSessionOwner(foreign)).resolves.toBe(false);
+    await expect(bus.finalizeSession(lost)).resolves.toBe(false);
+    await expect(bus.releaseSessionOwner(lost)).resolves.toBe(false);
+    await expect(bus.finalizeSession(lease)).resolves.toBe(true);
+    await expect(bus.finalizeSession(lease)).resolves.toBe(false);
+    await expect(bus.hydrateSessionState("session")).resolves.toBeUndefined();
+    await expect(bus.bindSessionOwner("session", "learner")).resolves.toBeUndefined();
+    await expect(bus.beginCommandOperation("session", "command", 1, 0)).resolves.toEqual({ state: "stale" });
+    await expect(bus.publish("session", "learner", STATUS)).rejects.toThrow("terminal");
+    await expect(bus.persistSessionState("session", SESSION_STATE)).rejects.toThrow("terminal");
+    await expect(bus.appendTranscript("session", "effect", {})).rejects.toThrow("terminal");
+    await bus.close();
+  });
+
+  it("maps visual admission results and rejects malformed Redis replies", async () => {
+    const bus = new SessionEventBus("rediss://localhost:6379", logger, undefined, { transcriptEncryptionKey: ENCRYPTION_KEY });
+    const publisher = redisState.instances[0]!;
+    const input = { learnerId: "learner", sessionId: "session", durationSeconds: 5 as const };
+    for (const status of [1, 3]) {
+      publisher.eval.mockResolvedValueOnce([status, "reservation", 55]);
+      await expect(bus.reserveVisualEntitlement(input)).resolves.toEqual({ status: "authorized_pending", reservationId: "reservation", remainingSeconds: 55, dailyLimitSeconds: 60 });
+    }
+    for (const [status, reason] of [[-1, "conflict"], [-2, "concurrency_limit"], [-3, "daily_limit"], [-4, "global_limit"]] as const) {
+      publisher.eval.mockResolvedValueOnce([status, "", -5]);
+      await expect(bus.reserveVisualEntitlement(input)).resolves.toEqual({ status: "denied", reason, remainingSeconds: 0, dailyLimitSeconds: 60 });
+    }
+    for (const malformed of [null, [1, "reservation"]]) {
+      publisher.eval.mockResolvedValueOnce(malformed);
+      await expect(bus.reserveVisualEntitlement(input)).rejects.toThrow("Unexpected visual entitlement");
+    }
+    publisher.status = "end";
+    await expect(bus.reserveVisualEntitlement(input)).resolves.toMatchObject({ status: "authorized_pending", remainingSeconds: 55 });
+    await bus.close();
+  });
+
+  it("uses fallback revisions for missing or invalid Redis state", async () => {
+    const bus = new SessionEventBus("redis://localhost:6379", logger, undefined, { transcriptEncryptionKey: ENCRYPTION_KEY });
+    const publisher = redisState.instances[0]!;
+    for (const raw of [null, "bad", "-1", "1.5"]) {
+      publisher.get.mockResolvedValueOnce(raw);
+      await expect(bus.readCommandRevision("session", 4)).resolves.toBe(4);
+    }
+    publisher.get.mockResolvedValueOnce("8");
+    await expect(bus.readCommandRevision("session")).resolves.toBe(8);
+    publisher.status = "end";
+    await expect(bus.readCommandRevision("session")).resolves.toBe(0);
+    await bus.persistSessionState("session", SESSION_STATE);
+    await expect(bus.readCommandRevision("session")).resolves.toBe(2);
+    await bus.close();
+  });
+
+  it("does not execute pending, stale, or completed-without-result Redis commands", async () => {
+    const bus = new SessionEventBus("redis://localhost:6379", logger, undefined, { transcriptEncryptionKey: ENCRYPTION_KEY });
+    const publisher = redisState.instances[0]!;
+    for (const [reply, state] of [[2, "pending"], [-1, "stale"], [-2, "stale"], [3, "pending"]] as const) {
+      publisher.eval.mockResolvedValueOnce(reply);
+      await expect(bus.beginCommandOperation("session", "command", 1, 0)).resolves.toEqual({ state });
+    }
+    const stateKey = "axiom:session:session:state";
+    publisher.get.mockResolvedValueOnce(encryptRetainedPayload(JSON.stringify({ revision: 0, updatedAt: "2026-01-01T00:00:00.000Z" }), decodeRetainedPayloadKey(ENCRYPTION_KEY), `active-state|session|${stateKey}`));
+    await expect(bus.beginCommandOperation("session", "new-command", 1, 0)).resolves.toMatchObject({ state: "accepted" });
+    const invocation = publisher.eval.mock.calls.at(-1)!;
+    const retained = JSON.parse(decryptRetainedPayload(String(invocation.at(-1)), decodeRetainedPayloadKey(ENCRYPTION_KEY), `active-state|session|${stateKey}`));
+    expect(retained.revision).toBe(1);
+    expect(Date.parse(retained.updatedAt)).toBeGreaterThan(Date.parse("2026-01-01T00:00:00.000Z"));
+    await bus.close();
+  });
+
+  it("fences Redis socket admission and terminal fanout without local delivery", async () => {
+    const bus = new SessionEventBus("redis://localhost:6379", logger, undefined, { transcriptEncryptionKey: ENCRYPTION_KEY });
+    const publisher = redisState.instances[0]!;
+    publisher.eval.mockResolvedValueOnce(0);
+    await expect(bus.reserveSocketPermit("session", "learner", "192.0.2.1")).resolves.toBeUndefined();
+    const permit = (await bus.reserveSocketPermit("session", "learner", "192.0.2.1"))!;
+    await expect(bus.refreshSocketPermit(permit)).resolves.toBe(true);
+    publisher.eval.mockResolvedValueOnce(0);
+    await expect(bus.refreshSocketPermit(permit)).resolves.toBe(false);
+    await bus.releaseSocketPermit(permit);
+    expect(publisher.eval.mock.calls.at(-1)?.[0]).toContain("release-socket");
+    const received = vi.fn();
+    bus.subscribe("session", "learner", received);
+    publisher.eval.mockResolvedValueOnce(0);
+    await expect(bus.publish("session", "learner", STATUS)).rejects.toThrow("terminal");
+    expect(received).not.toHaveBeenCalled();
+    publisher.eval.mockResolvedValueOnce(0);
+    await expect(bus.appendTranscript("session", "effect", {})).rejects.toThrow("terminal");
+    for (const id of ["", "x".repeat(501)]) await expect(bus.appendTranscript("session", id, {})).rejects.toThrow("identifier");
+    await bus.close();
+  });
+
+  it("isolates encrypted fanout by owner and ignores its own duplicate publication", async () => {
+    const bus = new SessionEventBus("redis://localhost:6379", logger, undefined, { requireRedis: true, transcriptEncryptionKey: ENCRYPTION_KEY });
+    await bus.connect();
+    await bus.bindSessionOwner("session", "learner");
+    const publisher = redisState.instances[0]!;
+    const receiver = redisState.instances[1]!;
+    const own = vi.fn();
+    const foreign = vi.fn();
+    bus.subscribe("session", "learner", own);
+    bus.subscribe("session", "other-learner", foreign);
+    await bus.publish("session", "learner", STATUS);
+    const channel = "axiom:session:session:events";
+    const ownPublication = String(publisher.eval.mock.calls.at(-1)?.at(-1));
+    receiver.handlers.pmessage!("axiom:session:*:events", channel, ownPublication);
+    expect(own).toHaveBeenCalledTimes(1);
+    for (const wire of [
+      { origin: "remote", learnerId: "learner", event: { type: "unknown" } },
+      { origin: "remote", event: STATUS },
+      { origin: "remote", learnerId: "other-learner", event: STATUS }
+    ]) {
+      const encrypted = encryptRetainedPayload(JSON.stringify(wire), decodeRetainedPayloadKey(ENCRYPTION_KEY), `gateway-event-pubsub|session|${channel}`);
+      receiver.handlers.pmessage!("axiom:session:*:events", channel, encrypted);
+    }
+    expect(own).toHaveBeenCalledTimes(1);
+    expect(foreign).not.toHaveBeenCalled();
+    expect(bus.isReady()).toBe(true);
+    publisher.status = "end";
+    expect(bus.isReady()).toBe(false);
+    publisher.status = "ready";
+    receiver.status = "end";
+    expect(bus.readiness().redis).toBe(false);
+    await bus.close();
+  });
+
+  it("normalizes embedded IPv4 and fully expanded IPv6 into a stable network boundary", () => {
+    expect(normalizeSocketNetworkIdentity("2001:db8:abcd:1234:0:0:192.0.2.1")).toBe("2001:db8:abcd:1234::/64");
+    expect(normalizeSocketNetworkIdentity("::1")).toBe("0:0:0:0::/64");
+    expect(normalizeSocketNetworkIdentity("fe80::1%en0")).toBe("fe80:0:0:0::/64");
+  });
+
   it("keeps in-memory session summaries idempotent and provides empty learner context", async () => {
     const sink = new InMemoryGatewayDurableSink();
     expect(await sink.probeReadiness()).toBe(true);

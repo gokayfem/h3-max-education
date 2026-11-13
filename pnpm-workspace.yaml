@@ -4,6 +4,14 @@ packages:
 
 overrides:
   esbuild: 0.28.2
+  # Keep security fixes within the major versions used by upstream dependencies.
+  'brace-expansion@1': 1.1.22
+  'brace-expansion@5': 5.0.13
+  'fast-uri@3': 3.1.9
+  'source-map-js@1': 1.2.2
+  'systeminformation@5': 5.33.16
+  'undici@7': 7.30.2
+  'vite@7': 7.3.8
 
 allowBuilds:
   esbuild: true

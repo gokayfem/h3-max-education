@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SessionEvent } from "@axiom/protocol";
+import { BrowserLaunchMetrics } from "../telemetry/browser-metrics";
 
 const falMocks = vi.hoisted(() => ({
   connect: vi.fn(),
@@ -130,6 +131,139 @@ describe("BrowserRealtimeTransport", () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     falMocks.connect.mockReset();
+  });
+
+  it.each([
+    ["tcp", "relay", "turn_tcp"],
+    ["udp", "relay", "turn_udp"],
+    ["tcp", "host", "direct_tcp"],
+    ["udp", "host", "direct_udp"],
+    ["sctp", "host", "unknown"],
+  ])("records only the bounded transport classification for %s/%s", async (protocol, candidateType, expected) => {
+    const { peer, dependencies } = createHarness();
+    Object.assign(peer, { getStats: async () => new Map<string, Record<string, unknown>>([
+      ["unselected", { type: "candidate-pair", state: "waiting", nominated: false }],
+      ["selected", { type: "candidate-pair", state: "succeeded", selected: true, localCandidateId: "local" }],
+      ["local", { type: "local-candidate", protocol, candidateType, address: "private-address" }],
+    ]) });
+    const record = vi.fn();
+    const metrics = new BrowserLaunchMetrics({ record });
+    const classify = vi.spyOn(metrics, "markSessionTransport");
+    const transport = new BrowserRealtimeTransport({ dependencies, metrics, gatewayUrl: "" });
+    const attempt = metrics.startSessionEstablishment();
+    transport.setSessionEstablishmentAttempt(attempt);
+    await transport.open({ sessionId: "session-1", learnerId: "learner-1" });
+    expect(classify).toHaveBeenCalledWith(attempt, expected);
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-address");
+    transport.dispose();
+  });
+
+  it.each(["empty", "missing-candidate", "rejected"])("keeps voice usable when connection statistics are %s", async (mode) => {
+    const { peer, dependencies } = createHarness();
+    Object.assign(peer, { getStats: async () => {
+      if (mode === "rejected") throw new Error("Statistics unavailable");
+      return mode === "empty" ? new Map() : new Map([
+        ["selected", { type: "candidate-pair", state: "succeeded", nominated: true }],
+      ]);
+    } });
+    const metrics = new BrowserLaunchMetrics({ record: vi.fn() });
+    const classify = vi.spyOn(metrics, "markSessionTransport");
+    const transport = new BrowserRealtimeTransport({ dependencies, metrics, gatewayUrl: "" });
+    const attempt = metrics.startSessionEstablishment();
+    transport.setSessionEstablishmentAttempt(attempt);
+    await transport.open({ sessionId: "session-1", learnerId: "learner-1" });
+    expect(classify).toHaveBeenCalledWith(attempt, "unknown");
+    expect(transport.mode).toBe("voice");
+    transport.dispose();
+  });
+
+  it.each(["NotAllowedError", "NotReadableError"])("records a bounded permission outcome for %s", async (name) => {
+    const { dependencies } = createHarness();
+    dependencies.getUserMedia = vi.fn(async () => { throw new DOMException("Device details", name); });
+    const record = vi.fn();
+    const metrics = new BrowserLaunchMetrics({ record });
+    const finish = vi.spyOn(metrics, "finishSessionEstablishment");
+    const transport = new BrowserRealtimeTransport({ dependencies, metrics, gatewayUrl: "" });
+    const attempt = metrics.startSessionEstablishment();
+    transport.setSessionEstablishmentAttempt(attempt);
+    await transport.open({ sessionId: "session-1", learnerId: "learner-1" });
+    expect(finish).toHaveBeenCalledWith(attempt, {
+      outcome: name === "NotAllowedError" ? "permission_denied" : "failed", failureStage: "permission",
+    });
+    expect(JSON.stringify(record.mock.calls)).not.toContain("Device details");
+    expect(transport.mode).toBe("text");
+    transport.dispose();
+  });
+
+  it("waits for both peer connection and data channel readiness", async () => {
+    const { peer, dependencies } = createHarness();
+    peer.connectionState = "connecting";
+    peer.channel.readyState = "connecting";
+    const negotiated = vi.spyOn(peer, "setRemoteDescription");
+    const transport = new BrowserRealtimeTransport({ dependencies, gatewayUrl: "" });
+    const opening = transport.open({ sessionId: "session-1", learnerId: "learner-1" });
+    await vi.waitFor(() => expect(negotiated).toHaveBeenCalled());
+    peer.connectionState = "connected";
+    peer.dispatchEvent(new Event("connectionstatechange"));
+    peer.channel.readyState = "open";
+    peer.channel.dispatchEvent(new Event("open"));
+    await opening;
+    expect(transport.mode).toBe("voice");
+    transport.dispose();
+  });
+
+  it.each(["failed", "closed"] as const)("releases the microphone when a negotiating peer becomes %s", async (state) => {
+    const { peer, dependencies, localTrack } = createHarness();
+    peer.connectionState = "connecting";
+    const negotiated = vi.spyOn(peer, "setRemoteDescription");
+    const transport = new BrowserRealtimeTransport({ dependencies, gatewayUrl: "" });
+    const opening = expect(transport.open({ sessionId: "session-1", learnerId: "learner-1" })).rejects.toThrow("peer connection failed");
+    await vi.waitFor(() => expect(negotiated).toHaveBeenCalled());
+    peer.connectionState = state;
+    peer.dispatchEvent(new Event("connectionstatechange"));
+    await opening;
+    expect(localTrack.stop).toHaveBeenCalled();
+    expect(peer.close).toHaveBeenCalled();
+    transport.dispose();
+  });
+
+  it.each(["peer", "channel"])("bounds the wait for an unresponsive %s", async (target) => {
+    vi.useFakeTimers();
+    const { peer, dependencies, localTrack } = createHarness();
+    if (target === "peer") peer.connectionState = "connecting";
+    else peer.channel.readyState = "connecting";
+    const transport = new BrowserRealtimeTransport({ dependencies, gatewayUrl: "" });
+    const opening = expect(transport.open({ sessionId: "session-1", learnerId: "learner-1" })).rejects.toThrow("timed out");
+    await vi.advanceTimersByTimeAsync(10_001);
+    await opening;
+    expect(localTrack.stop).toHaveBeenCalled();
+    transport.dispose();
+  });
+
+  it("cleans up after a data channel rejects its handshake", async () => {
+    const { peer, dependencies, localTrack } = createHarness();
+    peer.channel.readyState = "connecting";
+    const negotiated = vi.spyOn(peer, "setRemoteDescription");
+    const transport = new BrowserRealtimeTransport({ dependencies, gatewayUrl: "" });
+    const opening = expect(transport.open({ sessionId: "session-1", learnerId: "learner-1" })).rejects.toThrow("data channel failed");
+    await vi.waitFor(() => expect(negotiated).toHaveBeenCalled());
+    peer.channel.dispatchEvent(new Event("error"));
+    await opening;
+    expect(localTrack.stop).toHaveBeenCalled();
+    transport.dispose();
+  });
+
+  it("stops microphone access that completes after transport disposal", async () => {
+    const { dependencies, localTrack } = createHarness();
+    const pending = Promise.withResolvers<MediaStream>();
+    dependencies.getUserMedia = vi.fn(() => pending.promise);
+    const transport = new BrowserRealtimeTransport({ dependencies, gatewayUrl: "" });
+    const opening = transport.open({ sessionId: "session-1", learnerId: "learner-1" });
+    transport.dispose();
+    pending.resolve({ getTracks: () => [localTrack] } as unknown as MediaStream);
+    await opening;
+    expect(localTrack.stop).toHaveBeenCalledOnce();
+    expect(dependencies.fetch).not.toHaveBeenCalled();
   });
 
   it("mutes synchronously before sending the full cancellation sequence", async () => {

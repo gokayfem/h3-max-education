@@ -111,6 +111,53 @@ class RepositorySql implements SqlExecutor {
 }
 
 describe("PostgresLearningRepository", () => {
+  it("loads an empty context for a learner with no saved data", async () => {
+    const sql: SqlExecutor = { async query<Row>() { return [] as Row[]; } };
+    await expect(new PostgresLearningRepository(sql).load("new-learner")).resolves.toEqual({
+      learnerId: "new-learner",
+      mastery: [],
+      misconceptions: [],
+      preferences: { interests: [] },
+      recentSummaries: [],
+      recentCardInteractions: [],
+      recentVisualMetadata: [],
+    });
+  });
+
+  it("records evidence without inventing optional preferences or misconceptions", async () => {
+    const sql = new RepositorySql();
+    const repository = new PostgresLearningRepository(sql);
+    await repository.recordEvidence("learner-1", {
+      concept: "  FORCE  ", evidence: "predicted acceleration", confidenceDelta: 0.1,
+    }, "11111111-1111-4111-8111-111111111111");
+    expect(sql.calls[0]?.parameters).toEqual([
+      "11111111-1111-4111-8111-111111111111", "learner-1", "force", 0.1, "predicted acceleration",
+      null, null, null, null, [],
+    ]);
+  });
+
+  it("rejects blank learning subjects before sending any database query", async () => {
+    const sql = new RepositorySql();
+    const repository = new PostgresLearningRepository(sql);
+    await expect(repository.recordEvidence("learner-1", {
+      concept: "  ", evidence: "unclassified", confidenceDelta: 0.1,
+    })).rejects.toThrow("Evidence concept is required");
+    await expect(repository.addInterest("learner-1", "  ")).rejects.toThrow("Interest topic is required");
+    expect(sql.calls).toEqual([]);
+  });
+
+  it("uses null parameters for omitted profile and preference fields", async () => {
+    const sql = new RepositorySql();
+    const repository = new PostgresLearningRepository(sql);
+    const date = new Date("2026-08-30T10:00:00.000Z");
+    await repository.upsertProfile({ learnerId: "learner-1", ageBand: "13-15", ageBandConfirmedAt: date });
+    await repository.updatePreferences({ learnerId: "learner-1" });
+    expect(sql.calls.map((call) => call.parameters)).toEqual([
+      ["learner-1", null, "13-15", date],
+      ["learner-1", null, null, null],
+    ]);
+  });
+
   it("maps compact memory and profile rows", async () => {
     const repository = new PostgresLearningRepository(new RepositorySql());
     await expect(repository.load("learner-1")).resolves.toMatchObject({
